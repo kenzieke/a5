@@ -10,14 +10,12 @@
 #include "dac.h"
 
 #define DAC_PORT GPIOE
-#define CS GPIO_ODR_OD2
-#define SCK GPIO_ODR_OD13 // GPIOE Pin 13
-#define SDI GPIO_ODR_OD4 // 
-//#define LDAC GPIO_ODR_OD5
-//#define VREF_PIN GPIO_ODR_OD6
+#define SPI_CS GPIO_PIN_12	 // CS
+#define SPI_SCK GPIO_PIN_13  // CLK
+//#define SPI_PICO GPIO_PIN_14 // MISO
+#define SPI_COPI GPIO_PIN_15 // SDI
 #define VREF 3300
-#define WRITE_MSK 0111000000000000
-//#define VOUT GPIO_ODR_OD7
+#define WRITE_MSK 0x3000
 
 
 void SPI_init(void) {
@@ -49,36 +47,35 @@ void DAC_init() {
 	RCC-> APB2ENR |= (RCC_APB2ENR_SPI1EN);                // SPI1 port
 
 	/* USER ADD GPIO configuration of MODER/PUPDR/OTYPER/OSPEEDR registers HERE : 2-7 */
-	DAC_PORT->MODER   &= ~(GPIO_MODER_MODE2 | GPIO_MODER_MODE3 | GPIO_MODER_MODE4);
-	DAC_PORT->MODER   |=  (GPIO_MODER_MODE2_0 | GPIO_MODER_MODE3_0 | GPIO_MODER_MODE4_0);
-	DAC_PORT->OTYPER  &= ~(GPIO_OTYPER_OT2 | GPIO_OTYPER_OT3 | GPIO_OTYPER_OT4);
-	DAC_PORT->PUPDR   &= ~(GPIO_PUPDR_PUPD2 | GPIO_PUPDR_PUPD3 | GPIO_PUPDR_PUPD4);
-	DAC_PORT->OSPEEDR |= ((3 << GPIO_OSPEEDR_OSPEED2_Pos) |
-	 (3 << GPIO_OSPEEDR_OSPEED3_Pos) |
-	 (3 << GPIO_OSPEEDR_OSPEED4_Pos));
+	DAC_PORT->MODER   &= ~(GPIO_MODER_MODE12 | GPIO_MODER_MODE13 | GPIO_MODER_MODE15);
+	DAC_PORT->MODER   |=  (GPIO_MODER_MODE12 | GPIO_MODER_MODE13_1 | GPIO_MODER_MODE15_1);
+	DAC_PORT->OTYPER  &= ~(GPIO_MODER_MODE12 | GPIO_OTYPER_OT13 | GPIO_OTYPER_OT15);
+	DAC_PORT->PUPDR   &= ~(GPIO_MODER_MODE12 | GPIO_PUPDR_PUPD13 | GPIO_PUPDR_PUPD15);
+	DAC_PORT->OSPEEDR |= ((3 << GPIO_OSPEEDR_OSPEED12_Pos) |
+	 (3 << GPIO_OSPEEDR_OSPEED13_Pos) |
+	 (3 << GPIO_OSPEEDR_OSPEED15_Pos));
 
-	// configure AFR for SPI1 function (1 of 3 SPI bits shown here)
-	// make sure using pin designated for spi signal; 13, 14, 15
-	DAC_PORT->AFR[0] &= ~((0x000F << GPIO_AFRL_AFSEL7_Pos));	// clear nibble for bit 7 AF
-	DAC_PORT->AFR[0] |=  ((0x0005 << GPIO_AFRL_AFSEL7_Pos));	// set b7 AF to SPI1 (fcn 5)
-	DAC_PORT->AFR[1] &= ~((0x000F << GPIO_AFRL_AFSEL7_Pos));	// clear nibble for bit 7 AF
-	DAC_PORT->AFR[1] |=  ((0x0005 << GPIO_AFRL_AFSEL7_Pos));	// set b7 AF to SPI1 (fcn 5)
-	DAC_PORT->AFR[2] &= ~((0x000F << GPIO_AFRL_AFSEL7_Pos));	// clear nibble for bit 7 AF
-	DAC_PORT->AFR[2] |=  ((0x0005 << GPIO_AFRL_AFSEL7_Pos));	// set b7 AF to SPI1 (fcn 5)
+	// 12 is CS, 13 is SCK, 15 is SDI
+	DAC_PORT->AFR[1] &= ~((0x000F << GPIO_AFRH_AFSEL12_Pos));	// clear nibble for bit 12
+	DAC_PORT->AFR[1] |=  ((0x0005 << GPIO_AFRH_AFSEL12_Pos));	// set b12 AF to SPI1 (fcn 5)
+	DAC_PORT->AFR[1] &= ~((0x000F << GPIO_AFRH_AFSEL13_Pos));	// clear nibble for bit 13 AF
+	DAC_PORT->AFR[1] |=  ((0x0005 << GPIO_AFRH_AFSEL13_Pos));	// set b13 AF to SPI1 (fcn 5)
+	DAC_PORT->AFR[1] &= ~((0x000F << GPIO_AFRH_AFSEL15_Pos));	// clear nibble for bit 15 AF
+	DAC_PORT->AFR[1] |=  ((0x0005 << GPIO_AFRH_AFSEL15_Pos));	// set b15 AF to SPI1 (fcn 5)
 
 	SPI_init();
 }
 
 // write a 12-bit value to the DAC
 void DAC_write(uint16_t converted_voltage) {
-	// set cs low
-	DAC_PORT->BRR = CS;
 	// bit 15 = 0, bit 14 = 1, bit 13 = 1, bit 12 = 1, bit 11-0 from DAC_volt_conv
-	// stitch all the bits together to make dac_value
+	// stitch all the bits together to make dac_value, clear the upper four bits
+	converted_voltage = 0xFFF & converted_voltage;
 	uint16_t dac_value = WRITE_MSK | converted_voltage;
-	// look for when data flag goes high?
-	// if SPI1->SR & SPI->TXR
-	// SPI1->DR = dac_value
+	// look for when data flag goes high, then set data register to dac value
+	if (SPI1->SR & SPI_SR_TXE) {
+		SPI1->DR = dac_value;
+	}
 }
 
 // convert a voltage value into a 12-bit value to control the DAC
